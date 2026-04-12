@@ -79,6 +79,8 @@ typedef struct {
   long    total_recebidos; /* incrementado pela Terra                 */
 
   pthread_mutex_t mutex;
+  pthread_mutex_t mutex2;
+  pthread_mutex_t mutex3;
   sem_t mutex_orion_lua;
   sem_t empty_orion_lua;
   sem_t full_orion_lua;
@@ -86,6 +88,14 @@ typedef struct {
   sem_t mutex_lua_terra;
   sem_t empty_lua_terra;
   sem_t full_lua_terra;
+
+  Buffer prioridade_lua_terra;
+  sem_t mutex_prioridade_lua_terra;
+  sem_t empty_prioridade_lua_terra;
+  sem_t full_prioridade_lua_terra;
+
+  pthread_mutex_t mutex_buffer;
+  pthread_cond_t cond_buffer;
 
 } Contexto;
 
@@ -258,15 +268,33 @@ static void *relay(void *arg)
     /* Delay FTL simulado (muito menor que rádio) */
     usleep(20);
 
+    if(pr.prioridade)
+    {
+      sem_wait(&(ctx->empty_prioridade_lua_terra)); /* decresce contador empty */
+      sem_wait(&(ctx->mutex_prioridade_lua_terra)); /* entra na regiao critica */
+      pthread_mutex_lock(&ctx->mutex_buffer);
+      buffer_inserir(&ctx->prioridade_lua_terra, &pr);
+      pthread_cond_signal(&(ctx->cond_buffer));
+      pthread_mutex_unlock(&ctx->mutex_buffer);
+      sem_post(&(ctx->mutex_prioridade_lua_terra)); /* sai da regiao critica */
+      sem_post(&(ctx->full_prioridade_lua_terra));
+    }
+    else
+    {
+      sem_wait(&(ctx->empty_lua_terra)); /* decresce contador empty */
+      sem_wait(&(ctx->mutex_lua_terra)); /* entra na regiao critica */
+      pthread_mutex_lock(&ctx->mutex_buffer);
+      buffer_inserir(&ctx->buf_lua_terra, &pr);
+      pthread_cond_signal(&(ctx->cond_buffer));
+      pthread_mutex_unlock(&ctx->mutex_buffer);
+      sem_post(&(ctx->mutex_lua_terra)); /* sai da regiao critica */
+      sem_post(&(ctx->full_lua_terra));
+    }
 
-    sem_wait(&(ctx->empty_lua_terra)); /* decresce contador empty */
-    sem_wait(&(ctx->mutex_lua_terra)); /* entra na regiao critica */
-    buffer_inserir(&ctx->buf_lua_terra, &pr);
-    sem_post(&(ctx->mutex_lua_terra)); /* sai da regiao critica */
-    sem_post(&(ctx->full_lua_terra));
-  
-
+    pthread_mutex_lock(&(ctx->mutex2));
     ctx->total_relay++;
+    pthread_mutex_unlock(&(ctx->mutex2));
+    
   }
   return NULL;
 }
@@ -287,11 +315,29 @@ static void *terra(void *arg)
 
     PacoteRelay pr;
 
-    sem_wait(&(ctx->full_lua_terra)); /* decresce contador empty */
-    sem_wait(&(ctx->mutex_lua_terra)); /* entra na regiao critica */
-    buffer_remover(&ctx->buf_lua_terra, &pr);
-    sem_post(&(ctx->mutex_lua_terra)); /* sai da regiao critica */
-    sem_post(&(ctx->empty_lua_terra));
+    pthread_mutex_lock(&ctx->mutex_buffer);
+    while (ctx->prioridade_lua_terra.count == 0 && ctx->buf_lua_terra.count == 0) {
+        pthread_cond_wait(&(ctx->cond_buffer), &(ctx->mutex_buffer));
+    }
+    pthread_mutex_unlock(&ctx->mutex_buffer);
+
+
+    if(sem_trywait(&(ctx->full_prioridade_lua_terra)) != -1) /* decresce contador empty */
+    {
+      sem_wait(&(ctx->mutex_prioridade_lua_terra)); /* entra na regiao critica */
+      buffer_remover(&ctx->prioridade_lua_terra, &pr);
+      sem_post(&(ctx->mutex_prioridade_lua_terra)); /* sai da regiao critica */
+      sem_post(&(ctx->empty_prioridade_lua_terra));
+    }
+    else
+    {
+      sem_wait(&(ctx->full_lua_terra)); /* decresce contador empty */
+      sem_wait(&(ctx->mutex_lua_terra)); /* entra na regiao critica */
+      buffer_remover(&ctx->buf_lua_terra, &pr);
+      sem_post(&(ctx->mutex_lua_terra)); /* sai da regiao critica */
+      sem_post(&(ctx->empty_lua_terra));
+    }
+
 
     /* Validação de integridade */
     unsigned int cs = calcular_checksum(&pr.original);
@@ -305,7 +351,9 @@ static void *terra(void *arg)
 
     if (pr.prioridade == 1) alertas++;
 
+    pthread_mutex_lock(&(ctx->mutex3));
     ctx->total_recebidos++;
+    pthread_mutex_unlock(&(ctx->mutex3));
   }
 
   printf("\n[Terra] Recepção concluída.\n");
@@ -354,8 +402,12 @@ int main(int argc, char *argv[])
 
   buffer_init(&ctx.buf_orion_lua, buf_orion_lua, sizeof(Pacote));
   buffer_init(&ctx.buf_lua_terra, buf_lua_terra, sizeof(PacoteRelay));
+  buffer_init(&ctx.prioridade_lua_terra, buf_lua_terra, sizeof(PacoteRelay));
 
   pthread_mutex_init(&(ctx.mutex), NULL); 
+  pthread_mutex_init(&(ctx.mutex2), NULL);
+  pthread_mutex_init(&(ctx.mutex3), NULL);
+  pthread_mutex_init(&(ctx.mutex_buffer), NULL);
   sem_init(&(ctx.mutex_orion_lua), 0, 1);
   sem_init(&(ctx.empty_orion_lua), 0, buf_orion_lua);
   sem_init(&(ctx.full_orion_lua), 0, 0);
@@ -363,6 +415,10 @@ int main(int argc, char *argv[])
   sem_init(&(ctx.mutex_lua_terra), 0, 1);
   sem_init(&(ctx.empty_lua_terra), 0, buf_lua_terra);
   sem_init(&(ctx.full_lua_terra), 0, 0);
+
+  sem_init(&(ctx.mutex_prioridade_lua_terra), 0, 1);
+  sem_init(&(ctx.empty_prioridade_lua_terra), 0, buf_lua_terra);
+  sem_init(&(ctx.full_prioridade_lua_terra), 0, 0);
 
 
   /* Criação das threads */
@@ -382,10 +438,24 @@ int main(int argc, char *argv[])
   pthread_join(thread_relay, NULL);
   pthread_join(thread_terra, NULL);
 
-  pthread_mutex_destroy(&(ctx.mutex));
+ 
   /* Limpeza final */
+  pthread_mutex_destroy(&(ctx.mutex));
+  pthread_mutex_destroy(&(ctx.mutex2));
+  pthread_mutex_destroy(&(ctx.mutex3));
+  pthread_mutex_destroy(&(ctx.mutex_buffer));
+  sem_destroy(&(ctx.mutex_orion_lua));
+  sem_destroy(&(ctx.empty_orion_lua));
+  sem_destroy(&(ctx.full_orion_lua));
+  sem_destroy(&(ctx.mutex_lua_terra));
+  sem_destroy(&(ctx.empty_lua_terra));
+  sem_destroy(&(ctx.full_lua_terra));
+  sem_destroy(&(ctx.mutex_prioridade_lua_terra));
+  sem_destroy(&(ctx.empty_prioridade_lua_terra));
+  sem_destroy(&(ctx.full_prioridade_lua_terra));
   buffer_destruir(&ctx.buf_orion_lua);
   buffer_destruir(&ctx.buf_lua_terra);
+  buffer_destruir(&ctx.prioridade_lua_terra);
   free(threads_orion);
   return 0;
 }
