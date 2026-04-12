@@ -408,6 +408,9 @@ int main(int argc, char *argv[])
   pthread_mutex_init(&(ctx.mutex2), NULL);
   pthread_mutex_init(&(ctx.mutex3), NULL);
   pthread_mutex_init(&(ctx.mutex_buffer), NULL);
+
+  pthread_cond_init(&(ctx.cond_buffer), NULL);
+
   sem_init(&(ctx.mutex_orion_lua), 0, 1);
   sem_init(&(ctx.empty_orion_lua), 0, buf_orion_lua);
   sem_init(&(ctx.full_orion_lua), 0, 0);
@@ -444,6 +447,7 @@ int main(int argc, char *argv[])
   pthread_mutex_destroy(&(ctx.mutex2));
   pthread_mutex_destroy(&(ctx.mutex3));
   pthread_mutex_destroy(&(ctx.mutex_buffer));
+  pthread_cond_destroy(&(ctx.cond_buffer));
   sem_destroy(&(ctx.mutex_orion_lua));
   sem_destroy(&(ctx.empty_orion_lua));
   sem_destroy(&(ctx.full_orion_lua));
