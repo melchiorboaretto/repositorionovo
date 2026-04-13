@@ -22,7 +22,7 @@ run-buggy: all
 
 # Execução para testar a solução correta
 run: all
-	./$(TARGET) 5 8 4 100
+	./$(TARGET) 10 1 1 100
 
 pack:
 	mkdir -p T2_threads

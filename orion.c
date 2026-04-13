@@ -275,9 +275,9 @@ static void *relay(void *arg)
       pthread_mutex_lock(&ctx->mutex_buffer);
       buffer_inserir(&ctx->prioridade_lua_terra, &pr);
       pthread_cond_signal(&(ctx->cond_buffer));
-      pthread_mutex_unlock(&ctx->mutex_buffer);
       sem_post(&(ctx->mutex_prioridade_lua_terra)); /* sai da regiao critica */
       sem_post(&(ctx->full_prioridade_lua_terra));
+      pthread_mutex_unlock(&ctx->mutex_buffer);
     }
     else
     {
@@ -286,9 +286,9 @@ static void *relay(void *arg)
       pthread_mutex_lock(&ctx->mutex_buffer);
       buffer_inserir(&ctx->buf_lua_terra, &pr);
       pthread_cond_signal(&(ctx->cond_buffer));
-      pthread_mutex_unlock(&ctx->mutex_buffer);
       sem_post(&(ctx->mutex_lua_terra)); /* sai da regiao critica */
       sem_post(&(ctx->full_lua_terra));
+      pthread_mutex_unlock(&ctx->mutex_buffer);
     }
 
     pthread_mutex_lock(&(ctx->mutex2));
